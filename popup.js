@@ -2,6 +2,7 @@ const statusEl = document.getElementById("status");
 const progressBar = document.getElementById("progressBar");
 const progressFill = document.getElementById("progressFill");
 const saveDesktopBtn = document.getElementById("saveDesktop");
+const copyClipboardBtn = document.getElementById("copyClipboard");
 const sendFigmaBtn = document.getElementById("sendFigma");
 const figmaSettings = document.getElementById("figmaSettings");
 const figmaGoBtn = document.getElementById("figmaGo");
@@ -24,10 +25,14 @@ chrome.storage?.local?.get(["figmaToken", "figmaFileKey"], (data) => {
 // On open, immediately ask how many screenshots this page will produce
 chrome.runtime.sendMessage({ action: "getPageInfo" }).then((info) => {
   if (info && !info.error && info.total) {
-    previewEl.textContent = `This page will be ${info.total} screenshot${info.total > 1 ? "s" : ""}`;
+    previewEl.textContent = `This page will be ${info.total} screenshot${info.total > 1 ? "s" : ""}.`;
     previewEl.style.display = "block";
   }
 }).catch(() => {});
+
+function getSelectedDpi() {
+  return document.querySelector('input[name="dpi"]:checked')?.value || "2x";
+}
 
 function setStatus(msg, type = "") {
   statusEl.textContent = msg;
@@ -41,6 +46,7 @@ function setProgress(pct) {
 
 function setCapturing(capturing) {
   saveDesktopBtn.disabled = capturing;
+  copyClipboardBtn.disabled = capturing;
   sendFigmaBtn.disabled = capturing;
   figmaGoBtn.disabled = capturing;
   cancelBtn.classList.toggle("visible", capturing);
@@ -54,6 +60,14 @@ chrome.runtime.onMessage.addListener((msg) => {
   }
 });
 
+// Helper: capture with current options
+async function captureScreenshots(opts = {}) {
+  return chrome.runtime.sendMessage({
+    action: "captureFullPage",
+    options: { dpi: getSelectedDpi(), ...opts },
+  });
+}
+
 // Save to Downloads
 saveDesktopBtn.addEventListener("click", async () => {
   setCapturing(true);
@@ -62,9 +76,7 @@ saveDesktopBtn.addEventListener("click", async () => {
   setProgress(0);
 
   try {
-    const response = await chrome.runtime.sendMessage({
-      action: "captureFullPage",
-    });
+    const response = await captureScreenshots();
 
     if (response.error) {
       setStatus(response.error, "error");
@@ -74,7 +86,6 @@ saveDesktopBtn.addEventListener("click", async () => {
 
     const { screenshots, pageUrl } = response;
 
-    // Turn URL into a safe filename
     let urlSlug;
     try {
       const u = new URL(pageUrl);
@@ -110,6 +121,37 @@ saveDesktopBtn.addEventListener("click", async () => {
   setCapturing(false);
 });
 
+// Copy to clipboard
+copyClipboardBtn.addEventListener("click", async () => {
+  setCapturing(true);
+  setStatus("Capturing first screenshot...");
+  setProgress(0);
+
+  try {
+    const response = await captureScreenshots({ maxScreenshots: 1 });
+
+    if (response.error) {
+      setStatus(response.error, "error");
+      setCapturing(false);
+      return;
+    }
+
+    const { screenshots } = response;
+    setStatus("Copying to clipboard...");
+
+    const resp = await fetch(screenshots[0]);
+    const blob = await resp.blob();
+    await navigator.clipboard.write([new ClipboardItem({ "image/png": blob })]);
+
+    setProgress(100);
+    setStatus("Copied to clipboard", "success");
+  } catch (err) {
+    setStatus(`Error: ${err.message}`, "error");
+  }
+
+  setCapturing(false);
+});
+
 // Toggle Figma settings
 sendFigmaBtn.addEventListener("click", () => {
   figmaSettings.classList.toggle("visible");
@@ -133,9 +175,7 @@ figmaGoBtn.addEventListener("click", async () => {
   setProgress(0);
 
   try {
-    const response = await chrome.runtime.sendMessage({
-      action: "captureFullPage",
-    });
+    const response = await captureScreenshots();
 
     if (response.error) {
       setStatus(response.error, "error");

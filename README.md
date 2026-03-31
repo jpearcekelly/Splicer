@@ -16,8 +16,13 @@ Splicer fixes this by splitting the page into viewport-sized chunks that each st
 
 - Scrolls through the page automatically, capturing a screenshot at each viewport height
 - **Save to Downloads** — files named after the page URL (e.g. `example.com-pricing (1 of 6).png`)
+- **Copy to clipboard** — quickly grab the first screenshot for pasting into Figma, Slack, etc.
 - **Send to Figma** — uploads directly to a Figma file via the API
-- Shows a preview count before you capture ("This page will be 4 screenshots")
+- **DPI control** — toggle between 1x and 2x (Retina) to manage file size
+- **Smart capture** — hides sticky headers, nav bars, and cookie banners on screenshots 2+ so they don't repeat in every frame
+- **Lazy-load aware** — waits for images to finish loading after each scroll instead of using a fixed delay
+- **Trimmed last frame** — the final screenshot is cropped to show only the remaining content, no overlap
+- Shows a preview count before you capture ("This page will be 4 screenshots.")
 - Cancel mid-capture if needed
 - Handles Chrome's rate limits gracefully with automatic retry
 
@@ -31,9 +36,7 @@ Splicer fixes this by splitting the page into viewport-sized chunks that each st
 
 ## Roadmap
 
-- [ ] **Hide sticky/fixed elements** — automatically hide headers, nav bars, and cookie banners that repeat in every screenshot
-- [ ] **Copy to clipboard** — paste screenshots directly into Figma or Slack without saving files
-- [ ] **DPI control** — toggle between 1x and 2x (Retina) capture to manage file size
-- [ ] **Trim last screenshot** — crop the final image to avoid overlap with the previous one
-- [ ] **Smart lazy-load detection** — wait for images to finish loading after each scroll instead of using a fixed delay
+- [ ] **Remember preferences** — persist DPI choice between sessions
+- [ ] **Domain in preview** — show the site name alongside the screenshot count
+- [ ] **Single-screenshot shortcut** — skip the progress bar when the page fits in one frame
 - [ ] **Figma auto-layout** — place screenshots sequentially on a Figma canvas, not just upload as fills
