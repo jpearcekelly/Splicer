@@ -1,0 +1,192 @@
+const statusEl = document.getElementById("status");
+const progressBar = document.getElementById("progressBar");
+const progressFill = document.getElementById("progressFill");
+const saveDesktopBtn = document.getElementById("saveDesktop");
+const sendFigmaBtn = document.getElementById("sendFigma");
+const figmaSettings = document.getElementById("figmaSettings");
+const figmaGoBtn = document.getElementById("figmaGo");
+const figmaTokenInput = document.getElementById("figmaToken");
+const figmaFileKeyInput = document.getElementById("figmaFileKey");
+const previewEl = document.getElementById("preview");
+const cancelBtn = document.getElementById("cancelBtn");
+
+// Cancel button
+cancelBtn.addEventListener("click", async () => {
+  await chrome.runtime.sendMessage({ action: "cancelCapture" });
+});
+
+// Load saved Figma settings
+chrome.storage?.local?.get(["figmaToken", "figmaFileKey"], (data) => {
+  if (data?.figmaToken) figmaTokenInput.value = data.figmaToken;
+  if (data?.figmaFileKey) figmaFileKeyInput.value = data.figmaFileKey;
+});
+
+// On open, immediately ask how many screenshots this page will produce
+chrome.runtime.sendMessage({ action: "getPageInfo" }).then((info) => {
+  if (info && !info.error && info.total) {
+    previewEl.textContent = `This page will be ${info.total} screenshot${info.total > 1 ? "s" : ""}`;
+    previewEl.style.display = "block";
+  }
+}).catch(() => {});
+
+function setStatus(msg, type = "") {
+  statusEl.textContent = msg;
+  statusEl.className = type;
+}
+
+function setProgress(pct) {
+  progressBar.classList.toggle("visible", pct >= 0);
+  progressFill.style.width = `${pct}%`;
+}
+
+function setCapturing(capturing) {
+  saveDesktopBtn.disabled = capturing;
+  sendFigmaBtn.disabled = capturing;
+  figmaGoBtn.disabled = capturing;
+  cancelBtn.classList.toggle("visible", capturing);
+}
+
+// Listen for progress updates from background
+chrome.runtime.onMessage.addListener((msg) => {
+  if (msg.type === "capture-progress") {
+    setProgress((msg.current / msg.total) * 100);
+    setStatus(`Capturing screenshot ${msg.current} of ${msg.total}...`);
+  }
+});
+
+// Save to Downloads
+saveDesktopBtn.addEventListener("click", async () => {
+  setCapturing(true);
+  previewEl.style.display = "none";
+  setStatus("Starting capture...");
+  setProgress(0);
+
+  try {
+    const response = await chrome.runtime.sendMessage({
+      action: "captureFullPage",
+    });
+
+    if (response.error) {
+      setStatus(response.error, "error");
+      setCapturing(false);
+      return;
+    }
+
+    const { screenshots, pageUrl } = response;
+
+    // Turn URL into a safe filename
+    let urlSlug;
+    try {
+      const u = new URL(pageUrl);
+      urlSlug = (u.host + u.pathname)
+        .replace(/\/+$/, "")
+        .replace(/[^a-zA-Z0-9.-]/g, "-")
+        .replace(/-+/g, "-");
+    } catch {
+      urlSlug = "screenshot";
+    }
+
+    const total = screenshots.length;
+
+    for (let i = 0; i < total; i++) {
+      const filename =
+        total === 1
+          ? `${urlSlug}.png`
+          : `${urlSlug} (${i + 1} of ${total}).png`;
+
+      await chrome.downloads.download({
+        url: screenshots[i],
+        filename: filename,
+        saveAs: false,
+      });
+    }
+
+    setProgress(100);
+    setStatus(`Saved ${total} screenshot${total > 1 ? "s" : ""} to Downloads`, "success");
+  } catch (err) {
+    setStatus(`Error: ${err.message}`, "error");
+  }
+
+  setCapturing(false);
+});
+
+// Toggle Figma settings
+sendFigmaBtn.addEventListener("click", () => {
+  figmaSettings.classList.toggle("visible");
+});
+
+// Send to Figma
+figmaGoBtn.addEventListener("click", async () => {
+  const token = figmaTokenInput.value.trim();
+  const fileKey = figmaFileKeyInput.value.trim();
+
+  if (!token || !fileKey) {
+    setStatus("Please enter both Figma token and file key", "error");
+    return;
+  }
+
+  chrome.storage?.local?.set({ figmaToken: token, figmaFileKey: fileKey });
+
+  setCapturing(true);
+  previewEl.style.display = "none";
+  setStatus("Starting capture...");
+  setProgress(0);
+
+  try {
+    const response = await chrome.runtime.sendMessage({
+      action: "captureFullPage",
+    });
+
+    if (response.error) {
+      setStatus(response.error, "error");
+      setCapturing(false);
+      return;
+    }
+
+    const { screenshots, pageTitle } = response;
+    setStatus("Uploading to Figma...");
+
+    const imageBlobs = [];
+    for (const dataUrl of screenshots) {
+      const resp = await fetch(dataUrl);
+      imageBlobs.push(await resp.blob());
+    }
+
+    const uploadedImages = [];
+    for (let i = 0; i < imageBlobs.length; i++) {
+      setStatus(`Uploading image ${i + 1} of ${imageBlobs.length} to Figma...`);
+      setProgress(((i + 1) / imageBlobs.length) * 100);
+
+      const formData = new FormData();
+      const fileName = `${pageTitle || "Screenshot"}_${i + 1}.png`;
+      formData.append("file", imageBlobs[i], fileName);
+
+      const uploadResp = await fetch(
+        `https://api.figma.com/v1/images/${fileKey}`,
+        {
+          method: "POST",
+          headers: { "X-Figma-Token": token },
+          body: formData,
+        }
+      );
+
+      if (!uploadResp.ok) {
+        const errBody = await uploadResp.text();
+        throw new Error(`Figma upload failed (${uploadResp.status}): ${errBody}`);
+      }
+
+      const result = await uploadResp.json();
+      uploadedImages.push(result);
+    }
+
+    setProgress(100);
+    setStatus(
+      `Uploaded ${screenshots.length} image${screenshots.length > 1 ? "s" : ""} to Figma`,
+      "success"
+    );
+  } catch (err) {
+    setStatus(`Error: ${err.message}`, "error");
+  }
+
+  setCapturing(false);
+});
